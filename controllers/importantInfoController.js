@@ -1,5 +1,3 @@
-// travel-tour-important-info-backend/controllers/importantInfoController.js
-
 const ImportantInfo = require('../models/ImportantInfo');
 const Notification = require('../models/Notification');
 const axios = require('axios');
@@ -8,14 +6,10 @@ class ImportantInfoController {
     // Create new important information (Admin only)
     static async createImportantInfo(req, res) {
         try {
-            // SAFEGUARD: Check if user exists
-            if (!req.user) {
-                return res.status(401).json({ success: false, message: 'Unauthorized' });
-            }
-
             const { title, message, isUrgent, recipients } = req.body;
             const files = req.files || [];
 
+            // Create important info document
             const importantInfo = new ImportantInfo({
                 title,
                 message,
@@ -39,24 +33,27 @@ class ImportantInfoController {
 
             await importantInfo.save();
 
+            // Get all users from main API
             let allUsers = [];
             try {
-                const token = req.header('Authorization')?.replace('Bearer ', '');
-                if (token) {
-                    const response = await axios.get(`${process.env.MAIN_API_BASE_URL}/api/auth/users`, {
-                        headers: { 'Authorization': `Bearer ${token}` }
-                    });
-                    if (response.data.success) {
-                        allUsers = response.data.users || [];
+                const response = await axios.get(`${process.env.MAIN_API_BASE_URL}/api/auth/users`, {
+                    headers: {
+                        'Authorization': `Bearer ${req.header('Authorization').replace('Bearer ', '')}`
                     }
+                });
+                
+                if (response.data.success) {
+                    allUsers = response.data.users || [];
                 }
             } catch (error) {
                 console.error('Error fetching users from main API:', error.message);
             }
 
+            // Create notifications for recipients
             const notifications = [];
             const recipientIds = new Set();
 
+            // Determine recipient user IDs
             if (recipients && recipients.length > 0 && !recipients.includes('all')) {
                 recipients.forEach(recipient => {
                     if (recipient !== 'students' && recipient !== 'admins') {
@@ -65,6 +62,7 @@ class ImportantInfoController {
                 });
             }
 
+            // If recipients is 'all' or includes 'students'/'admins', add all users
             if (!recipients || recipients.includes('all') || recipients.includes('students') || recipients.includes('admins')) {
                 allUsers.forEach(user => {
                     if (recipients && recipients.length > 0) {
@@ -81,6 +79,7 @@ class ImportantInfoController {
                 });
             }
 
+            // Create notification for each recipient
             for (const userId of recipientIds) {
                 notifications.push({
                     userId,
@@ -91,10 +90,12 @@ class ImportantInfoController {
                 });
             }
 
+            // Bulk insert notifications
             if (notifications.length > 0) {
                 await Notification.insertMany(notifications);
             }
 
+            // Emit socket event for real-time notifications
             const io = req.app.get('io');
             notifications.forEach(notification => {
                 io.to(`user-${notification.userId}`).emit('new-important-info', {
@@ -105,6 +106,7 @@ class ImportantInfoController {
                 });
             });
 
+            // Also emit to admin room
             io.to('admin-room').emit('important-info-sent', {
                 messageId: importantInfo._id,
                 title: importantInfo.title,
@@ -128,13 +130,17 @@ class ImportantInfoController {
         }
     }
 
+    // Get all important information for admin (with pagination)
     static async getAllImportantInfo(req, res) {
         try {
             const page = parseInt(req.query.page) || 1;
             const limit = parseInt(req.query.limit) || 10;
             const skip = (page - 1) * limit;
 
+            // Get total count
             const total = await ImportantInfo.countDocuments();
+
+            // Get paginated data
             const importantInfo = await ImportantInfo.find()
                 .sort({ createdAt: -1 })
                 .skip(skip)
@@ -154,22 +160,22 @@ class ImportantInfoController {
             });
         } catch (error) {
             console.error('Error fetching important info:', error);
-            res.status(500).json({ success: false, message: 'Error fetching important information' });
+            res.status(500).json({
+                success: false,
+                message: 'Error fetching important information'
+            });
         }
     }
 
+    // Get important information for a specific user (with pagination)
     static async getUserImportantInfo(req, res) {
         try {
-            // SAFEGUARD: Verify user exists
-            if (!req.user || !req.user.userId) {
-                return res.status(401).json({ success: false, message: 'Unauthorized' });
-            }
-
             const userId = req.user.userId;
             const page = parseInt(req.query.page) || 1;
             const limit = parseInt(req.query.limit) || 10;
             const skip = (page - 1) * limit;
 
+            // Find messages where user is recipient and not deleted
             const query = {
                 $and: [
                     {
@@ -183,7 +189,10 @@ class ImportantInfoController {
                 ]
             };
 
+            // Get total count
             const total = await ImportantInfo.countDocuments(query);
+
+            // Get paginated data
             const importantInfo = await ImportantInfo.find(query)
                 .sort({ createdAt: -1 })
                 .skip(skip)
@@ -191,10 +200,11 @@ class ImportantInfoController {
                 .populate('sender.userId', 'name email')
                 .lean();
 
+            // Check if user has read each message
             const messagesWithReadStatus = importantInfo.map(message => ({
                 ...message,
-                isRead: (message.readBy || []).some(read => 
-                    read.userId && read.userId.toString() === userId.toString()
+                isRead: message.readBy.some(read => 
+                    read.userId && read.userId.toString() === userId
                 )
             }));
 
@@ -210,24 +220,31 @@ class ImportantInfoController {
             });
         } catch (error) {
             console.error('Error fetching user important info:', error);
-            res.status(500).json({ success: false, message: 'Error fetching important information' });
+            res.status(500).json({
+                success: false,
+                message: 'Error fetching important information'
+            });
         }
     }
 
+    // Mark message as read
     static async markAsRead(req, res) {
         try {
             const { messageId } = req.params;
-            if (!req.user) return res.status(401).json({ success: false, message: 'Unauthorized' });
-            
             const userId = req.user.userId;
+
             const message = await ImportantInfo.findById(messageId);
             
             if (!message) {
-                return res.status(404).json({ success: false, message: 'Message not found' });
+                return res.status(404).json({
+                    success: false,
+                    message: 'Message not found'
+                });
             }
 
-            const alreadyRead = (message.readBy || []).some(read => 
-                read.userId && read.userId.toString() === userId.toString()
+            // Check if already read
+            const alreadyRead = message.readBy.some(read => 
+                read.userId && read.userId.toString() === userId
             );
 
             if (!alreadyRead) {
@@ -235,40 +252,45 @@ class ImportantInfoController {
                 await message.save();
             }
 
+            // Mark notification as read
             await Notification.findOneAndUpdate(
                 { userId, messageId, type: 'important-info' },
-                { isRead: true }
+                { isRead: true },
+                { new: true }
             );
 
+            // Update notification count via socket
             const io = req.app.get('io');
             io.to(`user-${userId}`).emit('notification-updated', {
                 type: 'important-info',
                 countDecreased: true
             });
 
-            res.json({ success: true, message: 'Message marked as read' });
+            res.json({
+                success: true,
+                message: 'Message marked as read'
+            });
         } catch (error) {
             console.error('Error marking message as read:', error);
-            res.status(500).json({ success: false, message: 'Error marking message as read' });
+            res.status(500).json({
+                success: false,
+                message: 'Error marking message as read'
+            });
         }
     }
 
+    // Get unread count for user
     static async getUnreadCount(req, res) {
         try {
-            // FIXED: Added null check for req.user to prevent .toString() crash
-            if (!req.user || !req.user.userId) {
-                return res.status(401).json({ success: false, message: 'Unauthorized: No user session' });
-            }
-
             const userId = req.user.userId;
-            const userRole = req.user.role;
 
+            // Get messages where user is recipient, not deleted, and not read
             const query = {
                 $and: [
                     {
                         $or: [
                             { recipients: 'all' },
-                            { recipients: userRole },
+                            { recipients: req.user.role },
                             { recipients: userId.toString() }
                         ]
                     },
@@ -287,23 +309,29 @@ class ImportantInfoController {
             console.error('Error fetching unread count:', error);
             res.status(500).json({
                 success: false,
-                message: 'Error fetching unread count',
-                error: error.message
+                message: 'Error fetching unread count'
             });
         }
     }
 
+    // Delete message for user (soft delete)
     static async deleteForUser(req, res) {
         try {
-            if (!req.user) return res.status(401).json({ success: false, message: 'Unauthorized' });
             const { messageId } = req.params;
             const userId = req.user.userId;
 
             const message = await ImportantInfo.findById(messageId);
-            if (!message) return res.status(404).json({ success: false, message: 'Message not found' });
+            
+            if (!message) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Message not found'
+                });
+            }
 
-            const alreadyDeleted = (message.deletedFor || []).some(deleted => 
-                deleted.userId && deleted.userId.toString() === userId.toString()
+            // Check if already deleted for this user
+            const alreadyDeleted = message.deletedFor.some(deleted => 
+                deleted.userId && deleted.userId.toString() === userId
             );
 
             if (!alreadyDeleted) {
@@ -311,32 +339,59 @@ class ImportantInfoController {
                 await message.save();
             }
 
-            await Notification.findOneAndDelete({ userId, messageId, type: 'important-info' });
+            // Delete notification
+            await Notification.findOneAndDelete({
+                userId,
+                messageId,
+                type: 'important-info'
+            });
 
-            res.json({ success: true, message: 'Message deleted successfully' });
+            res.json({
+                success: true,
+                message: 'Message deleted successfully'
+            });
         } catch (error) {
             console.error('Error deleting message:', error);
-            res.status(500).json({ success: false, message: 'Error deleting message' });
+            res.status(500).json({
+                success: false,
+                message: 'Error deleting message'
+            });
         }
     }
 
+    // Admin: Delete message permanently
     static async deletePermanently(req, res) {
         try {
             const { messageId } = req.params;
+
+            // Delete message
             await ImportantInfo.findByIdAndDelete(messageId);
+
+            // Delete all related notifications
             await Notification.deleteMany({ messageId, type: 'important-info' });
-            res.json({ success: true, message: 'Message permanently deleted' });
+
+            res.json({
+                success: true,
+                message: 'Message permanently deleted'
+            });
         } catch (error) {
             console.error('Error deleting message permanently:', error);
-            res.status(500).json({ success: false, message: 'Error deleting message' });
+            res.status(500).json({
+                success: false,
+                message: 'Error deleting message'
+            });
         }
     }
 
+    // Helper method to get file type
     static getFileType(mimeType) {
-        if (!mimeType) return 'document';
-        if (mimeType === 'application/pdf') return 'pdf';
-        if (mimeType.startsWith('image/')) return 'image';
-        return 'document';
+        if (mimeType === 'application/pdf') {
+            return 'pdf';
+        } else if (mimeType.startsWith('image/')) {
+            return 'image';
+        } else {
+            return 'document';
+        }
     }
 }
 
