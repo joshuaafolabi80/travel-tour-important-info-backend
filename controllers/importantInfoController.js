@@ -10,6 +10,9 @@ class ImportantInfoController {
             const { title, message, isUrgent, recipients } = req.body;
             const files = req.files || [];
 
+            console.log('🔍 CREATE - Request body:', { title, isUrgent, recipients });
+            console.log('🔍 CREATE - User making request:', req.user);
+
             // ✅ FIX: Handle recipients properly - could be string 'all' or array
             let recipientsArray;
             if (recipients === 'all') {
@@ -22,6 +25,8 @@ class ImportantInfoController {
             } else {
                 recipientsArray = ['all'];
             }
+
+            console.log('✅ CREATE - Recipients array:', recipientsArray);
 
             // Create important info document
             const importantInfo = new ImportantInfo({
@@ -46,6 +51,7 @@ class ImportantInfoController {
             });
 
             await importantInfo.save();
+            console.log('✅ CREATE - Message saved to DB:', importantInfo._id);
 
             // Get all users from main API
             let allUsers = [];
@@ -59,6 +65,7 @@ class ImportantInfoController {
                 if (response.data.success) {
                     allUsers = response.data.users || [];
                 }
+                console.log('✅ CREATE - Fetched', allUsers.length, 'users from main API');
             } catch (error) {
                 console.error('Error fetching users from main API:', error.message);
             }
@@ -93,6 +100,8 @@ class ImportantInfoController {
                 });
             }
 
+            console.log('✅ CREATE - Recipient user IDs:', Array.from(recipientIds));
+
             // Create notification for each recipient
             for (const userId of recipientIds) {
                 notifications.push({
@@ -107,6 +116,7 @@ class ImportantInfoController {
             // Bulk insert notifications
             if (notifications.length > 0) {
                 await Notification.insertMany(notifications);
+                console.log('✅ CREATE - Created', notifications.length, 'notifications');
             }
 
             // Emit socket event for real-time notifications
@@ -184,11 +194,13 @@ class ImportantInfoController {
     // Get important information for a specific user (with pagination)
     static async getUserImportantInfo(req, res) {
         try {
+            console.log('🔍 GET_USER - Request received for user:', req.user);
+            
             const userId = req.user?.userId;
             
             // ✅ FIX: Check if userId exists
             if (!userId) {
-                console.warn('User ID is undefined in getUserImportantInfo');
+                console.error('❌ GET_USER - User ID is undefined! Full user object:', req.user);
                 return res.json({
                     success: true,
                     data: [],
@@ -208,6 +220,8 @@ class ImportantInfoController {
             // ✅ FIX: Use optional chaining and fallback for user role
             const userRole = req.user?.role || 'student';
 
+            console.log('🔍 GET_USER - Query params:', { userId, userRole, page, limit });
+
             // Find messages where user is recipient and not deleted
             const query = {
                 $and: [
@@ -222,8 +236,11 @@ class ImportantInfoController {
                 ]
             };
 
+            console.log('🔍 GET_USER - MongoDB query:', JSON.stringify(query, null, 2));
+
             // Get total count
             const total = await ImportantInfo.countDocuments(query);
+            console.log('🔍 GET_USER - Total messages matching query:', total);
 
             // Get paginated data
             const importantInfo = await ImportantInfo.find(query)
@@ -232,6 +249,11 @@ class ImportantInfoController {
                 .limit(limit)
                 .populate('sender.userId', 'name email')
                 .lean();
+
+            console.log('🔍 GET_USER - Found', importantInfo.length, 'messages');
+            if (importantInfo.length > 0) {
+                console.log('🔍 GET_USER - First message recipients:', importantInfo[0].recipients);
+            }
 
             // Check if user has read each message
             const messagesWithReadStatus = importantInfo.map(message => ({
@@ -255,7 +277,8 @@ class ImportantInfoController {
             console.error('Error fetching user important info:', error);
             res.status(500).json({
                 success: false,
-                message: 'Error fetching important information'
+                message: 'Error fetching important information',
+                error: error.message
             });
         }
     }
@@ -268,6 +291,7 @@ class ImportantInfoController {
             
             // ✅ FIX: Check if userId exists
             if (!userId) {
+                console.error('❌ MARK_READ - User ID is undefined');
                 return res.status(400).json({
                     success: false,
                     message: 'User ID is required'
@@ -323,11 +347,13 @@ class ImportantInfoController {
     // Get unread count for user
     static async getUnreadCount(req, res) {
         try {
+            console.log('🔍 UNREAD_COUNT - Request received for user:', req.user);
+            
             const userId = req.user?.userId;
             
             // ✅ FIX: Check if userId exists
             if (!userId) {
-                console.warn('User ID is undefined in getUnreadCount');
+                console.warn('❌ UNREAD_COUNT - User ID is undefined');
                 return res.json({
                     success: true,
                     count: 0
@@ -352,7 +378,10 @@ class ImportantInfoController {
                 ]
             };
 
+            console.log('🔍 UNREAD_COUNT - Query:', JSON.stringify(query, null, 2));
+            
             const unreadCount = await ImportantInfo.countDocuments(query);
+            console.log('🔍 UNREAD_COUNT - Result:', unreadCount);
 
             res.json({
                 success: true,

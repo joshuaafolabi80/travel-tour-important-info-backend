@@ -196,4 +196,112 @@ router.get('/debug/all-messages',
     }
 );
 
+// ✅ DEBUG: Test JWT token
+router.get('/debug/jwt-test',
+    authMiddleware,
+    (req, res) => {
+        const token = req.header('Authorization')?.replace('Bearer ', '');
+        
+        console.log('🔍 JWT DEBUG - Raw token (first 50 chars):', token?.substring(0, 50) + '...');
+        console.log('🔍 JWT DEBUG - Full user object from auth middleware:', req.user);
+        
+        res.json({
+            success: true,
+            tokenInfo: {
+                hasToken: !!token,
+                tokenLength: token?.length,
+                userFromMiddleware: req.user,
+                headersReceived: {
+                    authorization: !!req.header('Authorization'),
+                    contentType: req.header('Content-Type'),
+                    origin: req.header('Origin')
+                }
+            },
+            message: 'JWT test completed'
+        });
+    }
+);
+
+// ✅ DEBUG: Check current user authentication
+router.get('/debug/check-auth',
+    authMiddleware,
+    (req, res) => {
+        console.log('🔍 CHECK_AUTH - User authenticated:', req.user);
+        
+        res.json({
+            success: true,
+            authenticated: true,
+            user: req.user,
+            timestamp: new Date().toISOString(),
+            message: req.user.userId ? 
+                `User ${req.user.userId} (${req.user.email}) is authenticated` :
+                'User authenticated but missing userId!'
+        });
+    }
+);
+
+// ✅ DEBUG: Direct database query test
+router.get('/debug/test-query',
+    authMiddleware,
+    async (req, res) => {
+        try {
+            const userId = req.user?.userId;
+            const userRole = req.user?.role || 'student';
+            
+            console.log('🔍 TEST_QUERY - User:', { userId, userRole });
+            
+            // Test 1: Count all messages
+            const totalMessages = await ImportantInfo.countDocuments({});
+            
+            // Test 2: Check what recipients look like in existing messages
+            const sampleMessages = await ImportantInfo.find({})
+                .limit(3)
+                .select('title recipients createdAt')
+                .lean();
+            
+            // Test 3: Test the exact query
+            const query = {
+                $and: [
+                    {
+                        $or: [
+                            { recipients: 'all' },
+                            { recipients: userRole },
+                            { recipients: userId?.toString() }
+                        ]
+                    },
+                    { 'deletedFor.userId': { $ne: userId } }
+                ]
+            };
+            
+            const matchingMessages = await ImportantInfo.countDocuments(query);
+            
+            res.json({
+                success: true,
+                debug: {
+                    userId,
+                    userRole,
+                    totalMessagesInDB: totalMessages,
+                    sampleMessages: sampleMessages.map(msg => ({
+                        title: msg.title,
+                        recipients: msg.recipients,
+                        recipientsType: typeof msg.recipients,
+                        recipientsLength: msg.recipients?.length,
+                        createdAt: msg.createdAt
+                    })),
+                    queryUsed: query,
+                    messagesMatchingQuery: matchingMessages
+                },
+                message: `User ${userId || 'undefined'} can see ${matchingMessages} out of ${totalMessages} messages`
+            });
+        } catch (error) {
+            console.error('❌ TEST_QUERY - Error:', error);
+            res.status(500).json({
+                success: false,
+                error: error.message,
+                stack: error.stack
+            });
+        }
+    }
+);
+
 module.exports = router;
