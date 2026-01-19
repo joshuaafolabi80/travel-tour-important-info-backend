@@ -1,3 +1,5 @@
+// travel-tour-important-info-backend/controllers/notificationController.js
+
 const Notification = require('../models/Notification');
 
 class NotificationController {

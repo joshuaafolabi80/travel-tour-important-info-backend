@@ -1,5 +1,4 @@
-// travel-tour-important-info-backend/server.js
-
+// travel-tour-important-info-backend/server.js - UPDATED CORS SECTION
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -28,20 +27,22 @@ const uploadRoutes = require('./routes/uploadRoutes');
 const app = express();
 const server = http.createServer(app);
 
-// Socket.IO setup
-const io = socketIO(server, {
-    cors: {
-        origin: process.env.CLIENT_URL || "http://localhost:3000",
-        methods: ["GET", "POST"],
-        credentials: true
-    }
-});
+// ✅ FIXED: Enhanced CORS configuration
+app.use(cors({
+    origin: [
+        'https://the-conclave-academy.netlify.app',
+        'http://localhost:3000',
+        'http://localhost:5173'
+    ],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
+
+// Handle preflight requests
+app.options('*', cors());
 
 // Middleware
-app.use(cors({
-    origin: process.env.CLIENT_URL || "http://localhost:3000",
-    credentials: true
-}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -59,6 +60,19 @@ app.get('/api/health', (req, res) => {
         service: 'Important Information Server',
         timestamp: new Date().toISOString()
     });
+});
+
+// Socket.IO setup with CORS
+const io = socketIO(server, {
+    cors: {
+        origin: [
+            'https://the-conclave-academy.netlify.app',
+            'http://localhost:3000',
+            'http://localhost:5173'
+        ],
+        methods: ["GET", "POST"],
+        credentials: true
+    }
 });
 
 // Socket.IO connection handling
@@ -86,12 +100,12 @@ io.on('connection', (socket) => {
 // Make io available in routes
 app.set('io', io);
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI, {
+// ✅ FIXED: Connect to correct MongoDB database
+mongoose.connect(process.env.MONGODB_URI.replace('/travel_tour_important_info', '/travel_tour_academy'), {
     useNewUrlParser: true,
     useUnifiedTopology: true,
 })
-.then(() => console.log('MongoDB connected for Important Info'))
+.then(() => console.log('MongoDB connected to travel_tour_academy database'))
 .catch(err => console.error('MongoDB connection error:', err));
 
 const PORT = process.env.PORT || 5006;
