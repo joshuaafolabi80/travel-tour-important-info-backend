@@ -10,6 +10,19 @@ class ImportantInfoController {
             const { title, message, isUrgent, recipients } = req.body;
             const files = req.files || [];
 
+            // ✅ FIX: Handle recipients properly - could be string 'all' or array
+            let recipientsArray;
+            if (recipients === 'all') {
+                recipientsArray = ['all'];
+            } else if (Array.isArray(recipients)) {
+                recipientsArray = recipients;
+            } else if (recipients) {
+                // If it's a string (like 'students' or 'admins')
+                recipientsArray = [recipients];
+            } else {
+                recipientsArray = ['all'];
+            }
+
             // Create important info document
             const importantInfo = new ImportantInfo({
                 title,
@@ -21,7 +34,7 @@ class ImportantInfoController {
                     role: req.user.role
                 },
                 isUrgent: isUrgent || false,
-                recipients: recipients || ['all'],
+                recipients: recipientsArray,  // ✅ Use the properly formatted array
                 attachments: files.map(file => ({
                     filename: file.filename,
                     originalname: file.originalname,
@@ -55,8 +68,8 @@ class ImportantInfoController {
             const recipientIds = new Set();
 
             // Determine recipient user IDs
-            if (recipients && recipients.length > 0 && !recipients.includes('all')) {
-                recipients.forEach(recipient => {
+            if (recipientsArray && recipientsArray.length > 0 && !recipientsArray.includes('all')) {
+                recipientsArray.forEach(recipient => {
                     if (recipient !== 'students' && recipient !== 'admins') {
                         recipientIds.add(recipient);
                     }
@@ -64,14 +77,14 @@ class ImportantInfoController {
             }
 
             // If recipients is 'all' or includes 'students'/'admins', add all users
-            if (!recipients || recipients.includes('all') || recipients.includes('students') || recipients.includes('admins')) {
+            if (recipientsArray.includes('all') || recipientsArray.includes('students') || recipientsArray.includes('admins')) {
                 allUsers.forEach(user => {
-                    if (recipients && recipients.length > 0) {
-                        if (recipients.includes('students') && user.role === 'student') {
+                    if (recipientsArray.length > 0) {
+                        if (recipientsArray.includes('students') && user.role === 'student') {
                             recipientIds.add(user._id);
-                        } else if (recipients.includes('admins') && user.role === 'admin') {
+                        } else if (recipientsArray.includes('admins') && user.role === 'admin') {
                             recipientIds.add(user._id);
-                        } else if (recipients.includes('all')) {
+                        } else if (recipientsArray.includes('all')) {
                             recipientIds.add(user._id);
                         }
                     } else {
