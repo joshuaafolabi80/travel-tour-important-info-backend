@@ -1,12 +1,27 @@
 // travel-tour-important-info-backend/controllers/notificationController.js
-
 const Notification = require('../models/Notification');
 
 class NotificationController {
     // Get notifications for user
     static async getUserNotifications(req, res) {
         try {
-            const userId = req.user.userId;
+            const userId = req.user?.userId;
+            
+            // ✅ FIX: Check if userId exists
+            if (!userId) {
+                console.warn('User ID is undefined in getUserNotifications');
+                return res.json({
+                    success: true,
+                    data: [],
+                    pagination: {
+                        currentPage: 1,
+                        totalPages: 0,
+                        totalItems: 0,
+                        itemsPerPage: 10
+                    }
+                });
+            }
+            
             const page = parseInt(req.query.page) || 1;
             const limit = parseInt(req.query.limit) || 10;
             const skip = (page - 1) * limit;
@@ -44,7 +59,15 @@ class NotificationController {
     // Mark all notifications as read
     static async markAllAsRead(req, res) {
         try {
-            const userId = req.user.userId;
+            const userId = req.user?.userId;
+            
+            // ✅ FIX: Check if userId exists
+            if (!userId) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'User ID is required'
+                });
+            }
 
             await Notification.updateMany(
                 { userId, isRead: false },
@@ -73,7 +96,15 @@ class NotificationController {
     // Clear all notifications
     static async clearAllNotifications(req, res) {
         try {
-            const userId = req.user.userId;
+            const userId = req.user?.userId;
+            
+            // ✅ FIX: Check if userId exists
+            if (!userId) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'User ID is required'
+                });
+            }
 
             await Notification.deleteMany({ userId });
 

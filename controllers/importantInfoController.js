@@ -1,5 +1,4 @@
 // travel-tour-important-info-backend/controllers/importantInfoController.js
-
 const ImportantInfo = require('../models/ImportantInfo');
 const Notification = require('../models/Notification');
 const axios = require('axios');
@@ -172,10 +171,29 @@ class ImportantInfoController {
     // Get important information for a specific user (with pagination)
     static async getUserImportantInfo(req, res) {
         try {
-            const userId = req.user.userId;
+            const userId = req.user?.userId;
+            
+            // ✅ FIX: Check if userId exists
+            if (!userId) {
+                console.warn('User ID is undefined in getUserImportantInfo');
+                return res.json({
+                    success: true,
+                    data: [],
+                    pagination: {
+                        currentPage: 1,
+                        totalPages: 0,
+                        totalItems: 0,
+                        itemsPerPage: 10
+                    }
+                });
+            }
+            
             const page = parseInt(req.query.page) || 1;
             const limit = parseInt(req.query.limit) || 10;
             const skip = (page - 1) * limit;
+
+            // ✅ FIX: Use optional chaining and fallback for user role
+            const userRole = req.user?.role || 'student';
 
             // Find messages where user is recipient and not deleted
             const query = {
@@ -183,7 +201,7 @@ class ImportantInfoController {
                     {
                         $or: [
                             { recipients: 'all' },
-                            { recipients: req.user.role },
+                            { recipients: userRole },
                             { recipients: userId.toString() }
                         ]
                     },
@@ -233,7 +251,15 @@ class ImportantInfoController {
     static async markAsRead(req, res) {
         try {
             const { messageId } = req.params;
-            const userId = req.user.userId;
+            const userId = req.user?.userId;
+            
+            // ✅ FIX: Check if userId exists
+            if (!userId) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'User ID is required'
+                });
+            }
 
             const message = await ImportantInfo.findById(messageId);
             
@@ -284,7 +310,19 @@ class ImportantInfoController {
     // Get unread count for user
     static async getUnreadCount(req, res) {
         try {
-            const userId = req.user.userId;
+            const userId = req.user?.userId;
+            
+            // ✅ FIX: Check if userId exists
+            if (!userId) {
+                console.warn('User ID is undefined in getUnreadCount');
+                return res.json({
+                    success: true,
+                    count: 0
+                });
+            }
+
+            // ✅ FIX: Use optional chaining and fallback for user role
+            const userRole = req.user?.role || 'student';
 
             // Get messages where user is recipient, not deleted, and not read
             const query = {
@@ -292,7 +330,7 @@ class ImportantInfoController {
                     {
                         $or: [
                             { recipients: 'all' },
-                            { recipients: req.user.role },
+                            { recipients: userRole },
                             { recipients: userId.toString() }
                         ]
                     },
@@ -320,7 +358,15 @@ class ImportantInfoController {
     static async deleteForUser(req, res) {
         try {
             const { messageId } = req.params;
-            const userId = req.user.userId;
+            const userId = req.user?.userId;
+            
+            // ✅ FIX: Check if userId exists
+            if (!userId) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'User ID is required'
+                });
+            }
 
             const message = await ImportantInfo.findById(messageId);
             
