@@ -157,20 +157,26 @@ class ImportantInfoController {
     // Get all important information for admin (with pagination)
     static async getAllImportantInfo(req, res) {
         try {
+            console.log('🔍 GET_ALL - Request received from admin:', req.user);
+            
             const page = parseInt(req.query.page) || 1;
             const limit = parseInt(req.query.limit) || 10;
             const skip = (page - 1) * limit;
 
+            console.log('🔍 GET_ALL - Pagination:', { page, limit, skip });
+
             // Get total count
             const total = await ImportantInfo.countDocuments();
+            console.log('✅ GET_ALL - Total messages:', total);
 
-            // Get paginated data
+            // Get paginated data - REMOVED .populate() to fix "MissingSchemaError"
             const importantInfo = await ImportantInfo.find()
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
-                .populate('sender.userId', 'name email')
-                .lean();
+                .lean(); // ✅ FIX: Removed .populate('sender.userId', 'name email')
+
+            console.log('✅ GET_ALL - Found', importantInfo.length, 'messages');
 
             res.json({
                 success: true,
@@ -183,10 +189,12 @@ class ImportantInfoController {
                 }
             });
         } catch (error) {
-            console.error('Error fetching important info:', error);
+            console.error('❌ Error fetching important info:', error);
+            console.error('❌ Error stack:', error.stack);
             res.status(500).json({
                 success: false,
-                message: 'Error fetching important information'
+                message: 'Error fetching important information',
+                error: error.message
             });
         }
     }
@@ -222,14 +230,20 @@ class ImportantInfoController {
 
             console.log('🔍 GET_USER - Query params:', { userId, userRole, page, limit });
 
-            // Find messages where user is recipient and not deleted
+            // ✅ FIX: Handle malformed recipients (like ["[\"all\"]"])
             const query = {
                 $and: [
                     {
                         $or: [
                             { recipients: 'all' },
+                            { recipients: { $in: ['all'] } }, // Check array contains 'all'
+                            { 'recipients.0': 'all' }, // Check first element is 'all'
                             { recipients: userRole },
-                            { recipients: userId.toString() }
+                            { recipients: { $in: [userRole] } },
+                            { 'recipients.0': userRole },
+                            { recipients: userId.toString() },
+                            { recipients: { $in: [userId.toString()] } },
+                            { 'recipients.0': userId.toString() }
                         ]
                     },
                     { 'deletedFor.userId': { $ne: userId } }
@@ -242,17 +256,18 @@ class ImportantInfoController {
             const total = await ImportantInfo.countDocuments(query);
             console.log('🔍 GET_USER - Total messages matching query:', total);
 
-            // Get paginated data
+            // Get paginated data - REMOVED .populate() to fix "MissingSchemaError"
             const importantInfo = await ImportantInfo.find(query)
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
-                .populate('sender.userId', 'name email')
-                .lean();
+                .lean(); // ✅ FIX: Removed .populate('sender.userId', 'name email')
 
             console.log('🔍 GET_USER - Found', importantInfo.length, 'messages');
             if (importantInfo.length > 0) {
                 console.log('🔍 GET_USER - First message recipients:', importantInfo[0].recipients);
+                console.log('🔍 GET_USER - First message recipients type:', typeof importantInfo[0].recipients);
+                console.log('🔍 GET_USER - First message recipients[0]:', importantInfo[0].recipients[0]);
             }
 
             // Check if user has read each message
@@ -279,6 +294,64 @@ class ImportantInfoController {
                 success: false,
                 message: 'Error fetching important information',
                 error: error.message
+            });
+        }
+    }
+
+    // Get unread count for user
+    static async getUnreadCount(req, res) {
+        try {
+            console.log('🔍 UNREAD_COUNT - Request received for user:', req.user);
+            
+            const userId = req.user?.userId;
+            
+            // ✅ FIX: Check if userId exists
+            if (!userId) {
+                console.warn('❌ UNREAD_COUNT - User ID is undefined');
+                return res.json({
+                    success: true,
+                    count: 0
+                });
+            }
+
+            // ✅ FIX: Use optional chaining and fallback for user role
+            const userRole = req.user?.role || 'student';
+
+            // ✅ FIX: Handle malformed recipients in query
+            const query = {
+                $and: [
+                    {
+                        $or: [
+                            { recipients: 'all' },
+                            { recipients: { $in: ['all'] } },
+                            { 'recipients.0': 'all' },
+                            { recipients: userRole },
+                            { recipients: { $in: [userRole] } },
+                            { 'recipients.0': userRole },
+                            { recipients: userId.toString() },
+                            { recipients: { $in: [userId.toString()] } },
+                            { 'recipients.0': userId.toString() }
+                        ]
+                    },
+                    { 'deletedFor.userId': { $ne: userId } },
+                    { 'readBy.userId': { $ne: userId } }
+                ]
+            };
+
+            console.log('🔍 UNREAD_COUNT - Query:', JSON.stringify(query, null, 2));
+            
+            const unreadCount = await ImportantInfo.countDocuments(query);
+            console.log('🔍 UNREAD_COUNT - Result:', unreadCount);
+
+            res.json({
+                success: true,
+                count: unreadCount
+            });
+        } catch (error) {
+            console.error('Error fetching unread count:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error fetching unread count'
             });
         }
     }
@@ -340,58 +413,6 @@ class ImportantInfoController {
             res.status(500).json({
                 success: false,
                 message: 'Error marking message as read'
-            });
-        }
-    }
-
-    // Get unread count for user
-    static async getUnreadCount(req, res) {
-        try {
-            console.log('🔍 UNREAD_COUNT - Request received for user:', req.user);
-            
-            const userId = req.user?.userId;
-            
-            // ✅ FIX: Check if userId exists
-            if (!userId) {
-                console.warn('❌ UNREAD_COUNT - User ID is undefined');
-                return res.json({
-                    success: true,
-                    count: 0
-                });
-            }
-
-            // ✅ FIX: Use optional chaining and fallback for user role
-            const userRole = req.user?.role || 'student';
-
-            // Get messages where user is recipient, not deleted, and not read
-            const query = {
-                $and: [
-                    {
-                        $or: [
-                            { recipients: 'all' },
-                            { recipients: userRole },
-                            { recipients: userId.toString() }
-                        ]
-                    },
-                    { 'deletedFor.userId': { $ne: userId } },
-                    { 'readBy.userId': { $ne: userId } }
-                ]
-            };
-
-            console.log('🔍 UNREAD_COUNT - Query:', JSON.stringify(query, null, 2));
-            
-            const unreadCount = await ImportantInfo.countDocuments(query);
-            console.log('🔍 UNREAD_COUNT - Result:', unreadCount);
-
-            res.json({
-                success: true,
-                count: unreadCount
-            });
-        } catch (error) {
-            console.error('Error fetching unread count:', error);
-            res.status(500).json({
-                success: false,
-                message: 'Error fetching unread count'
             });
         }
     }
