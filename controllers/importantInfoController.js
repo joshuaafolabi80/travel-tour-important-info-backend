@@ -3,6 +3,17 @@ const ImportantInfo = require('../models/ImportantInfo');
 const Notification = require('../models/Notification');
 const axios = require('axios');
 
+// ✅ MOVE getFileType OUTSIDE the class to make it a standalone function
+const getFileType = (mimeType) => {
+    if (mimeType === 'application/pdf') {
+        return 'pdf';
+    } else if (mimeType.startsWith('image/')) {
+        return 'image';
+    } else {
+        return 'document';
+    }
+};
+
 class ImportantInfoController {
     // Create new important information (Admin only)
     static async createImportantInfo(req, res) {
@@ -44,8 +55,9 @@ class ImportantInfoController {
                     // Create full URL for the file
                     let fileUrl;
                     if (file.path) {
-                        // For local files
-                        fileUrl = `${req.protocol}://${req.get('host')}/uploads/${file.filename}`;
+                        // For local files - fix the path
+                        const relativePath = file.path.replace(/^.*[\\\/]/, '');
+                        fileUrl = `${req.protocol}://${req.get('host')}/uploads/${relativePath}`;
                     } else if (file.location) {
                         // For cloud storage (AWS S3, etc.)
                         fileUrl = file.location;
@@ -56,7 +68,7 @@ class ImportantInfoController {
                         originalname: file.originalname,
                         path: file.path,
                         url: fileUrl,
-                        fileType: this.getFileType(file.mimetype),
+                        fileType: getFileType(file.mimetype), // ✅ FIX: Use standalone function
                         size: file.size
                     });
                 });
@@ -512,17 +524,10 @@ class ImportantInfoController {
             });
         }
     }
-
-    // Helper method to get file type
-    static getFileType(mimeType) {
-        if (mimeType === 'application/pdf') {
-            return 'pdf';
-        } else if (mimeType.startsWith('image/')) {
-            return 'image';
-        } else {
-            return 'document';
-        }
-    }
 }
 
-module.exports = ImportantInfoController;
+// ✅ EXPORT the getFileType function as well
+module.exports = {
+    ImportantInfoController,
+    getFileType
+};
