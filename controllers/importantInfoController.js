@@ -2,6 +2,16 @@
 const ImportantInfo = require('../models/ImportantInfo');
 const Notification = require('../models/Notification');
 const axios = require('axios');
+const cloudinary = require('cloudinary').v2;
+const fs = require('fs');
+const path = require('path');
+
+// Configure Cloudinary
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
 class ImportantInfoController {
     // Create new important information (Admin only)
@@ -29,10 +39,11 @@ class ImportantInfoController {
 
             console.log('✅ CREATE - Recipients array:', recipientsArray);
 
-            // ✅ FIX: Handle file attachments properly
+            // ✅ FIX: Handle file attachments with Cloudinary
             const attachments = [];
+            
             if (files && files.length > 0) {
-                files.forEach(file => {
+                for (const file of files) {
                     console.log('📁 Processing file:', {
                         filename: file.filename,
                         originalname: file.originalname,
@@ -41,15 +52,40 @@ class ImportantInfoController {
                         path: file.path
                     });
 
-                    // Create full URL for the file
                     let fileUrl;
-                    if (file.path) {
-                        // For local files - fix the path
-                        const filename = file.filename;
-                        fileUrl = `${req.protocol}://${req.get('host')}/uploads/${filename}`;
-                    } else if (file.location) {
-                        // For cloud storage (AWS S3, etc.)
-                        fileUrl = file.location;
+                    let cloudinaryResult = null;
+
+                    try {
+                        // Upload to Cloudinary
+                        cloudinaryResult = await cloudinary.uploader.upload(file.path, {
+                            folder: 'important-info',
+                            resource_type: 'auto',
+                            allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'doc', 'docx'],
+                            use_filename: true,
+                            unique_filename: true
+                        });
+                        
+                        console.log('✅ CLOUDINARY - Upload successful:', cloudinaryResult.secure_url);
+                        fileUrl = cloudinaryResult.secure_url;
+                        
+                        // Delete local file after successful upload
+                        fs.unlinkSync(file.path);
+                        console.log('✅ CLEANUP - Local file deleted');
+                        
+                    } catch (cloudinaryError) {
+                        console.error('❌ CLOUDINARY - Upload failed:', cloudinaryError.message);
+                        
+                        // Fallback to local file URL
+                        if (file.path) {
+                            const filename = path.basename(file.filename);
+                            let subfolder = 'documents/';
+                            if (file.mimetype === 'application/pdf') {
+                                subfolder = 'pdf/';
+                            } else if (file.mimetype.startsWith('image/')) {
+                                subfolder = 'images/';
+                            }
+                            fileUrl = `${req.protocol}://${req.get('host')}/uploads/${subfolder}${filename}`;
+                        }
                     }
 
                     attachments.push({
@@ -57,10 +93,11 @@ class ImportantInfoController {
                         originalname: file.originalname,
                         path: file.path,
                         url: fileUrl,
+                        cloudinaryId: cloudinaryResult?.public_id || null,
                         fileType: ImportantInfoController.getFileType(file.mimetype),
                         size: file.size
                     });
-                });
+                }
             }
 
             // Create important info document
@@ -81,7 +118,7 @@ class ImportantInfoController {
             await importantInfo.save();
             console.log('✅ CREATE - Message saved to DB:', importantInfo._id);
 
-            // ✅ FIX: REMOVED user fetching to prevent timeout
+            // ✅ FIX: REMOVED blocking user fetching to prevent timeout
             // Instead, handle notifications asynchronously
             const allUsers = []; // Empty array for now
             
@@ -156,7 +193,8 @@ class ImportantInfoController {
                 messageId: importantInfo._id,
                 title: importantInfo.title,
                 isUrgent: importantInfo.isUrgent,
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
+                attachmentsCount: attachments.length
             });
             
             // Specific room for admin
@@ -551,6 +589,30 @@ class ImportantInfoController {
             const { messageId } = req.params;
 
             // Delete message
+            const message = await ImportantInfo.findById(messageId);
+            
+            if (!message) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Message not found'
+                });
+            }
+
+            // Delete files from Cloudinary if they exist
+            if (message.attachments && message.attachments.length > 0) {
+                for (const attachment of message.attachments) {
+                    if (attachment.cloudinaryId) {
+                        try {
+                            await cloudinary.uploader.destroy(attachment.cloudinaryId);
+                            console.log('✅ CLOUDINARY - Deleted file:', attachment.cloudinaryId);
+                        } catch (cloudinaryError) {
+                            console.error('❌ CLOUDINARY - Error deleting file:', cloudinaryError.message);
+                        }
+                    }
+                }
+            }
+
+            // Delete message from database
             await ImportantInfo.findByIdAndDelete(messageId);
 
             // Delete all related notifications
