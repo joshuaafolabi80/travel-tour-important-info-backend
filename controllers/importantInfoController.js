@@ -12,6 +12,7 @@ class ImportantInfoController {
 
             console.log('🔍 CREATE - Request body:', { title, isUrgent, recipients });
             console.log('🔍 CREATE - User making request:', req.user);
+            console.log('🔍 CREATE - Files received:', files.length);
 
             // ✅ FIX: Handle recipients properly - could be string 'all' or array
             let recipientsArray;
@@ -28,6 +29,39 @@ class ImportantInfoController {
 
             console.log('✅ CREATE - Recipients array:', recipientsArray);
 
+            // ✅ FIX: Handle file attachments properly
+            const attachments = [];
+            if (files && files.length > 0) {
+                files.forEach(file => {
+                    console.log('📁 Processing file:', {
+                        filename: file.filename,
+                        originalname: file.originalname,
+                        mimetype: file.mimetype,
+                        size: file.size,
+                        path: file.path
+                    });
+
+                    // Create full URL for the file
+                    let fileUrl;
+                    if (file.path) {
+                        // For local files
+                        fileUrl = `${req.protocol}://${req.get('host')}/uploads/${file.filename}`;
+                    } else if (file.location) {
+                        // For cloud storage (AWS S3, etc.)
+                        fileUrl = file.location;
+                    }
+
+                    attachments.push({
+                        filename: file.filename,
+                        originalname: file.originalname,
+                        path: file.path,
+                        url: fileUrl,
+                        fileType: this.getFileType(file.mimetype),
+                        size: file.size
+                    });
+                });
+            }
+
             // Create important info document
             const importantInfo = new ImportantInfo({
                 title,
@@ -38,16 +72,9 @@ class ImportantInfoController {
                     email: req.user.email,
                     role: req.user.role
                 },
-                isUrgent: isUrgent || false,
-                recipients: recipientsArray,  // ✅ Use the properly formatted array
-                attachments: files.map(file => ({
-                    filename: file.filename,
-                    originalname: file.originalname,
-                    path: file.path,
-                    url: file.path ? `${req.protocol}://${req.get('host')}/${file.path}` : file.url,
-                    fileType: this.getFileType(file.mimetype),
-                    size: file.size
-                }))
+                isUrgent: isUrgent === 'true' || isUrgent === true,
+                recipients: recipientsArray,
+                attachments: attachments
             });
 
             await importantInfo.save();
@@ -145,7 +172,8 @@ class ImportantInfoController {
             });
 
         } catch (error) {
-            console.error('Error creating important info:', error);
+            console.error('❌ Error creating important info:', error);
+            console.error('❌ Error stack:', error.stack);
             res.status(500).json({
                 success: false,
                 message: 'Error creating important information',
@@ -169,12 +197,12 @@ class ImportantInfoController {
             const total = await ImportantInfo.countDocuments();
             console.log('✅ GET_ALL - Total messages:', total);
 
-            // Get paginated data - REMOVED .populate() to fix "MissingSchemaError"
+            // Get paginated data
             const importantInfo = await ImportantInfo.find()
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
-                .lean(); // ✅ FIX: Removed .populate('sender.userId', 'name email')
+                .lean();
 
             console.log('✅ GET_ALL - Found', importantInfo.length, 'messages');
 
@@ -206,7 +234,6 @@ class ImportantInfoController {
             
             const userId = req.user?.userId;
             
-            // ✅ FIX: Check if userId exists
             if (!userId) {
                 console.error('❌ GET_USER - User ID is undefined! Full user object:', req.user);
                 return res.json({
@@ -225,19 +252,18 @@ class ImportantInfoController {
             const limit = parseInt(req.query.limit) || 10;
             const skip = (page - 1) * limit;
 
-            // ✅ FIX: Use optional chaining and fallback for user role
             const userRole = req.user?.role || 'student';
 
             console.log('🔍 GET_USER - Query params:', { userId, userRole, page, limit });
 
-            // ✅ FIX: Handle malformed recipients (like ["[\"all\"]"])
+            // Find messages where user is recipient and not deleted
             const query = {
                 $and: [
                     {
                         $or: [
                             { recipients: 'all' },
-                            { recipients: { $in: ['all'] } }, // Check array contains 'all'
-                            { 'recipients.0': 'all' }, // Check first element is 'all'
+                            { recipients: { $in: ['all'] } },
+                            { 'recipients.0': 'all' },
                             { recipients: userRole },
                             { recipients: { $in: [userRole] } },
                             { 'recipients.0': userRole },
@@ -256,18 +282,16 @@ class ImportantInfoController {
             const total = await ImportantInfo.countDocuments(query);
             console.log('🔍 GET_USER - Total messages matching query:', total);
 
-            // Get paginated data - REMOVED .populate() to fix "MissingSchemaError"
+            // Get paginated data
             const importantInfo = await ImportantInfo.find(query)
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
-                .lean(); // ✅ FIX: Removed .populate('sender.userId', 'name email')
+                .lean();
 
             console.log('🔍 GET_USER - Found', importantInfo.length, 'messages');
             if (importantInfo.length > 0) {
                 console.log('🔍 GET_USER - First message recipients:', importantInfo[0].recipients);
-                console.log('🔍 GET_USER - First message recipients type:', typeof importantInfo[0].recipients);
-                console.log('🔍 GET_USER - First message recipients[0]:', importantInfo[0].recipients[0]);
             }
 
             // Check if user has read each message
@@ -305,7 +329,6 @@ class ImportantInfoController {
             
             const userId = req.user?.userId;
             
-            // ✅ FIX: Check if userId exists
             if (!userId) {
                 console.warn('❌ UNREAD_COUNT - User ID is undefined');
                 return res.json({
@@ -314,10 +337,8 @@ class ImportantInfoController {
                 });
             }
 
-            // ✅ FIX: Use optional chaining and fallback for user role
             const userRole = req.user?.role || 'student';
 
-            // ✅ FIX: Handle malformed recipients in query
             const query = {
                 $and: [
                     {
@@ -362,7 +383,6 @@ class ImportantInfoController {
             const { messageId } = req.params;
             const userId = req.user?.userId;
             
-            // ✅ FIX: Check if userId exists
             if (!userId) {
                 console.error('❌ MARK_READ - User ID is undefined');
                 return res.status(400).json({
@@ -423,7 +443,6 @@ class ImportantInfoController {
             const { messageId } = req.params;
             const userId = req.user?.userId;
             
-            // ✅ FIX: Check if userId exists
             if (!userId) {
                 return res.status(400).json({
                     success: false,
